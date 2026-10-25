@@ -5,6 +5,7 @@ import requests
 import datetime
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from io import StringIO
 
 # Page Configuration
 st.set_page_config(
@@ -13,8 +14,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Common IMF Country List & Euro Area Code
-# Euro area code uses G163 as specified by the IMF
+# IMF Country List & Euro Area Code (G163)
 IMF_COUNTRIES = {
     "United States": "US",
     "Euro Area": "G163",
@@ -41,102 +41,71 @@ IMF_COUNTRIES = {
 @st.cache_data(show_spinner=False, ttl=86400)
 def fetch_imf_series(iso3: str, indicator_type: str) -> pd.Series:
     """
-    Fetches monthly time-series data from the IMF SDMX 3.0 API.
-    indicator_type: 'CPI' -> {ISO3}.CPI._T.IX.M
-                    'EXC' -> {ISO3}.XDC_USD.PA_RT.M
+    Fetches monthly time-series data directly from the IMF SDMX 3.0 API.
     """
     base_url = "https://api.imf.org/external/sdmx/3.0"
     
     if indicator_type == "CPI":
-        # Format: {ISO3}.CPI._T.IX.M
-        # Note: Depending on dataset version, CPI dataflow is typically 'CPI'
-        dataflow = "CPI"
-        key = f"{iso3}.CPI._T.IX.M"
+        # SDMX 3.0 dataflow for Consumer Price Index
+        path = f"data/IMF.STA,CPI,5.0.0/{iso3}.CPI._T.IX.M"
     else:
-        # Format: {ISO3}.XDC_USD.PA_RT.M
-        # Exchange rate dataflow is typically 'IFS' (International Financial Statistics)
-        dataflow = "IFS"
-        key = f"{iso3}.XDC_USD.PA_RT.M"
+        # SDMX 3.0 dataflow for Exchange Rates (IFS)
+        path = f"data/IMF.STA,IFS,3.0.0/{iso3}.XDC_USD.PA_RT.M"
         
-    url = f"{base_url}/data/dataflow/IMF.{dataflow}/1.0/{key}"
+    url = f"{base_url}/{path}?startPeriod=1976-01"
     headers = {"Accept": "application/vnd.sdmx.data+csv;version=1.0.0"}
     
     try:
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=20)
         if response.status_code != 200:
-            # Fallback attempt with SDMX 2.1 / generic JSON or alternative header if needed
             return pd.Series(dtype=float)
         
-        # Read CSV response from SDMX 3.0 API
-        from io import StringIO
         df = pd.read_csv(StringIO(response.text))
-        
         if df.empty or 'TIME_PERIOD' not in df.columns or 'OBS_VALUE' not in df.columns:
             return pd.Series(dtype=float)
             
-        # Clean and convert
         df['TIME_PERIOD'] = pd.to_datetime(df['TIME_PERIOD'], errors='coerce')
         df['OBS_VALUE'] = pd.to_numeric(df['OBS_VALUE'], errors='coerce')
         df = df.dropna(subset=['TIME_PERIOD', 'OBS_VALUE'])
-        
-        # Sort and return as monthly Period index series
         df = df.sort_values('TIME_PERIOD')
-        series = pd.Series(df['OBS_VALUE'].values, index=df['TIME_PERIOD'].dt.to_period('M'))
-        return series
+        
+        return pd.Series(df['OBS_VALUE'].values, index=df['TIME_PERIOD'].dt.to_period('M'))
     except Exception:
         return pd.Series(dtype=float)
-
-def load_country_data(iso3: str):
-    cpi = fetch_imf_series(iso3, "CPI")
-    exc = fetch_imf_series(iso3, "EXC")
-    return cpi, exc
 
 # App Layout
 st.title("🌐 IMF Real Exchange Rate (RER) Analysis Dashboard")
 st.markdown("""
-Compare bilateral real and nominal exchange rates using official monthly CPI and exchange rate data retrieved directly from the **IMF SDMX 3.0 API**.
+Compare bilateral real and nominal exchange rates using official monthly CPI and exchange-rate records retrieved live from the **IMF SDMX 3.0 API**.
 """)
 
 with st.sidebar:
     st.header("⚙️ Configuration")
     
     country_names = list(IMF_COUNTRIES.keys())
-    country1_name = st.selectbox("Country 1 (Base / Home)", country_names, index=0) # US default
-    country2_name = st.selectbox("Country 2 (Quote / Foreign)", country_names, index=1) # Euro Area default
+    country1_name = st.selectbox("Country 1 (Base / Home)", country_names, index=0)
+    country2_name = st.selectbox("Country 2 (Quote / Foreign)", country_names, index=1)
     
     code1 = IMF_COUNTRIES[country1_name]
     code2 = IMF_COUNTRIES[country2_name]
     
     if code1 == code2:
-        st.warning("Please select two different countries/regions for meaningful bilateral comparison.")
+        st.warning("Please select two different countries or regions.")
 
     st.markdown("---")
     chart_metric = st.radio("Display Metric", ["Real", "Nominal", "Both"], index=2)
     
     st.markdown("---")
-    st.info("Data source: IMF SDMX 3.0 API (Monthly CPI index & XDC per USD exchange rates starting from January 1976 where available).")
+    st.info("Data source: IMF SDMX 3.0 API (`IMF.STA,CPI,5.0.0` and `IMF.STA,IFS,3.0.0`).")
 
-# Fetch data with spinner
-with st.spinner(f"Fetching monthly IMF records for {country1_name} and {country2_name}..."):
-    cpi1, xdc_usd1 = load_country_data(code1)
-    cpi2, xdc_usd2 = load_country_data(code2)
+# Fetch data live
+with st.spinner(f"Fetching live IMF records for {country1_name} and {country2_name}..."):
+    cpi1 = fetch_imf_series(code1, "CPI")
+    xdc_usd1 = fetch_imf_series(code1, "EXC")
+    cpi2 = fetch_imf_series(code2, "CPI")
+    xdc_usd2 = fetch_imf_series(code2, "EXC")
 
-# Fallback synthetic/mock indicator or helper if live network queries return empty in restricted server environments,
-# ensuring the app remains fully interactive and robust.
-def get_fallback_data(code):
-    # Generates synthetic monthly data back to 1976 for demonstration/robustness if API blocks external sandbox calls
-    dates = pd.period_range(start="1976-01", end=datetime.datetime.now().strftime("%Y-%m"), freq="M")
-    np.random.seed(hash(code) % 10000)
-    cpi_base = 50 + np.cumsum(np.random.normal(0.2, 0.5, len(dates)))
-    exc_base = 1.0 + np.cumsum(np.random.normal(0.001, 0.02, len(dates)))
-    return pd.Series(cpi_base, index=dates), pd.Series(exc_base, index=dates)
-
-if cpi1.empty or xdc_usd1.empty:
-    cpi1, xdc_usd1 = get_fallback_data(code1)
-if cpi2.empty or xdc_usd2.empty:
-    cpi2, xdc_usd2 = get_fallback_data(code2)
-
-# Align dataframes on monthly frequency intersection
+# Align datasets on monthly frequency intersection
 df_merged = pd.DataFrame({
     'CPI1': cpi1,
     'XDC_USD1': xdc_usd1,
@@ -145,9 +114,8 @@ df_merged = pd.DataFrame({
 }).dropna()
 
 if df_merged.empty:
-    st.error("No overlapping data observations found for the selected pair.")
+    st.error(f"No overlapping live observations found between {country1_name} and {country2_name} via the IMF SDMX API. Try adjusting your country selections.")
 else:
-    # Convert period index to datetime for date sliders
     df_merged.index = df_merged.index.to_timestamp()
     min_date = df_merged.index.min().date()
     max_date = df_merged.index.max().date()
@@ -159,42 +127,34 @@ else:
     with col_d2:
         end_date = st.date_input("End Month", value=max_date, min_value=min_date, max_value=max_date)
 
-    start_period = pd.to_datetime(start_date)
-    end_period = pd.to_datetime(end_date)
-
-    # Filter dataframe by user-selected date range
-    mask = (df_merged.index >= start_period) & (df_merged.index <= end_period)
+    mask = (df_merged.index >= pd.to_datetime(start_date)) & (df_merged.index <= pd.to_datetime(end_date))
     df_filtered = df_merged.loc[mask].copy()
 
     if df_filtered.empty:
-        st.warning("Selected date range contains no observations. Please adjust your start and end dates.")
+        st.warning("Selected date range contains no observations.")
     else:
-        # IMF exchange rates are expressed as local currency units per USD (XDC_USD).
-        # We want S(t) defined as units of Country 2 currency per one unit of Country 1 currency.
-        # S(t) = (XDC per USD for Country 2) / (XDC per USD for Country 1)
+        # S(t) = units of Country 2 currency per one unit of Country 1 currency
+        # IMF exchange rates are XDC per USD, so S(t) = (XDC_USD2) / (XDC_USD1)
         df_filtered['S_t'] = df_filtered['XDC_USD2'] / df_filtered['XDC_USD1']
-
-        # RER(t) = S(t) * P1(t) / P2(t)
         df_filtered['RER_t'] = df_filtered['S_t'] * df_filtered['CPI1'] / df_filtered['CPI2']
 
-        # RER* = average of RER(t) over valid months within the user-selected sample period
+        # RER* = average of RER(t) over valid months in the selected period
         rer_star = df_filtered['RER_t'].mean()
 
         # Real Index(t) = 100 * RER(t) / RER*
         df_filtered['Real_Index'] = 100.0 * df_filtered['RER_t'] / rer_star
 
-        # Summary Metrics Display
+        # Summary Metrics
         m1, m2, m3 = st.columns(3)
         m1.metric("Selected Sample Base RER*", f"{rer_star:.4f}")
         m2.metric("Latest Nominal Rate S(t)", f"{df_filtered['S_t'].iloc[-1]:.4f}", f"{country2_name} per {country1_name}")
         m3.metric("Latest Real Index (Base=100)", f"{df_filtered['Real_Index'].iloc[-1]:.2f}")
 
-        # Interactive Plotting using Plotly
+        # Interactive Plotting
         st.markdown("---")
         st.subheader("📊 Interactive Exchange Rate Charts")
 
         fig = make_subplots(specs=[[{"secondary_y": True}]])
-
         show_real = chart_metric in ["Real", "Both"]
         show_nom = chart_metric in ["Nominal", "Both"]
 
@@ -217,7 +177,7 @@ else:
                     name=f"Nominal Exchange Rate S(t) [{country2_name} per {country1_name}]",
                     line=dict(color="#ff7f0e", width=2, dash="dash")
                 ),
-                secondary_y=(chart_metric == "Both") # Use secondary axis if 'Both' is selected
+                secondary_y=(chart_metric == "Both")
             )
 
         fig.update_layout(
@@ -238,7 +198,7 @@ else:
 
         st.plotly_chart(fig, use_container_width=True)
 
-        # Data Preview and CSV Download
+        # Data Table and Download
         st.markdown("---")
         st.subheader("📁 Observations & Calculations Table")
         
