@@ -13,76 +13,72 @@ st.set_page_config(
     layout="wide"
 )
 
-# Common IMF Country List & Euro Area Code (G163)
+# IMF Country List mapping to ISO Alpha-3 and Euro Area Code
 IMF_COUNTRIES = {
-    "United States": "US",
+    "United States": "USA",
     "Euro Area": "G163",
-    "United Kingdom": "GB",
-    "Japan": "JP",
-    "Canada": "CA",
-    "Australia": "AU",
-    "Switzerland": "CH",
-    "China": "CN",
-    "India": "IN",
-    "Brazil": "BR",
-    "Mexico": "MX",
-    "South Korea": "KR",
-    "Sweden": "SE",
-    "Norway": "NO",
-    "New Zealand": "NZ",
-    "Singapore": "SG",
-    "South Africa": "ZA",
-    "Denmark": "DK",
-    "Poland": "PL",
-    "Türkiye": "TR"
+    "United Kingdom": "GBR",
+    "Japan": "JPN",
+    "Canada": "CAN",
+    "Australia": "AUS",
+    "Switzerland": "CHE",
+    "China": "CHN",
+    "India": "IND",
+    "Brazil": "BRA",
+    "Mexico": "MEX",
+    "South Korea": "KOR",
+    "Sweden": "SWE",
+    "Norway": "NOR",
+    "New Zealand": "NZL",
+    "Singapore": "SGP",
+    "South Africa": "ZAF",
+    "Denmark": "DNK",
+    "Poland": "POL",
+    "Türkiye": "TUR"
 }
 
 @st.cache_data(show_spinner=False, ttl=86400)
 def fetch_imf_series(iso3: str, indicator_type: str) -> pd.Series:
     """
-    Fetches monthly time-series data from the official IMF SDMX 3.0 API,
-    testing multiple canonical REST path structures to ensure compatibility.
+    Fetches monthly time-series data directly from the official IMF SDMX 3.0 API endpoint
+    using ISO Alpha-3 codes and correct dataflow syntax.
     """
     base_url = "https://api.imf.org/external/sdmx/3.0/data"
     
     if indicator_type == "CPI":
+        # Key format: {ISO3}.CPI._T.IX.M
         key = f"{iso3}.CPI._T.IX.M"
-        paths = [
-            f"IMF.STA,CPI,5.0.0/{key}",
-            f"dataflow/IMF.STA/CPI/5.0.0/{key}",
-            f"CPI/{key}"
-        ]
+        path = f"IMF.STA,CPI,5.0.0/{key}"
     else:
+        # Key format: {ISO3}.XDC_USD.PA_RT.M
         key = f"{iso3}.XDC_USD.PA_RT.M"
-        paths = [
-            f"IMF.STA,IFS,3.0.0/{key}",
-            f"IMF.STA,ER/4.0.1/{key}",
-            f"dataflow/IMF.STA/ER/4.0.1/{key}",
-            f"IFS/{key}"
-        ]
+        path = f"IMF.STA,IFS,3.0.0/{key}"
         
+    url = f"{base_url}/{path}?startPeriod=1976-01"
     headers = {
         "Accept": "application/vnd.sdmx.data+csv;version=1.0.0",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
     }
     
-    for path in paths:
-        url = f"{base_url}/{path}?startPeriod=1976-01"
-        try:
-            response = requests.get(url, headers=headers, timeout=15)
-            if response.status_code == 200 and len(response.text.strip()) > 50:
-                df = pd.read_csv(StringIO(response.text))
-                if not df.empty and 'TIME_PERIOD' in df.columns and 'OBS_VALUE' in df.columns:
-                    df['TIME_PERIOD'] = pd.to_datetime(df['TIME_PERIOD'], errors='coerce')
-                    df['OBS_VALUE'] = pd.to_numeric(df['OBS_VALUE'], errors='coerce')
-                    df = df.dropna(subset=['TIME_PERIOD', 'OBS_VALUE'])
-                    if not df.empty:
-                        df = df.sort_values('TIME_PERIOD')
-                        return pd.Series(df['OBS_VALUE'].values, index=df['TIME_PERIOD'].dt.to_period('M'))
-        except Exception:
-            continue
+    try:
+        response = requests.get(url, headers=headers, timeout=20)
+        if response.status_code != 200:
+            return pd.Series(dtype=float)
+        
+        df = pd.read_csv(StringIO(response.text))
+        if df.empty or 'TIME_PERIOD' not in df.columns or 'OBS_VALUE' not in df.columns:
+            return pd.Series(dtype=float)
             
-    return pd.Series(dtype=float)
+        # Clean monthly periods (handling both YYYY-MM and YYYY-M01 formats)
+        df['TIME_PERIOD'] = df['TIME_PERIOD'].astype(str).str.replace('-M', '-', regex=False)
+        df['TIME_PERIOD'] = pd.to_datetime(df['TIME_PERIOD'], errors='coerce')
+        df['OBS_VALUE'] = pd.to_numeric(df['OBS_VALUE'], errors='coerce')
+        df = df.dropna(subset=['TIME_PERIOD', 'OBS_VALUE'])
+        df = df.sort_values('TIME_PERIOD')
+        
+        return pd.Series(df['OBS_VALUE'].values, index=df['TIME_PERIOD'].dt.to_period('M'))
+    except Exception:
+        return pd.Series(dtype=float)
 
 # App Layout
 st.title("🌐 IMF Real Exchange Rate (RER) Analysis Dashboard")
@@ -127,7 +123,7 @@ df_merged = pd.DataFrame({
 if df_merged.empty:
     st.error(
         f"No overlapping observations found between **{country1_name}** (`{code1}`) and **{country2_name}** (`{code2}`) "
-        "via the IMF SDMX API endpoint. Diagnostic check: CPI1 count: {len(cpi1)}, EXC1 count: {len(xdc_usd1)}, CPI2 count: {len(cpi2)}, EXC2 count: {len(xdc_usd2)}."
+        f"via the IMF SDMX API endpoint. [Diagnostic check: CPI1 count: {len(cpi1)}, EXC1 count: {len(xdc_usd1)}, CPI2 count: {len(cpi2)}, EXC2 count: {len(xdc_usd2)}]"
     )
 else:
     df_merged.index = df_merged.index.to_timestamp()
