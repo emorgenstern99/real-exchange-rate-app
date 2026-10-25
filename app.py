@@ -41,7 +41,7 @@ IMF_COUNTRIES = {
 def fetch_imf_series(iso3: str, indicator_type: str) -> pd.Series:
     """
     Fetches monthly time-series data directly from the official IMF SDMX 3.0 API 
-    using the verified dataflow REST path, version wildcard ~, and time constraints.
+    using the correct dataflows: IMF.STA/CPI/~ for CPI and IMF.STA/ER/~ for Exchange Rates.
     """
     base_url = "https://api.imf.org/external/sdmx/3.0/data/dataflow"
     
@@ -50,7 +50,7 @@ def fetch_imf_series(iso3: str, indicator_type: str) -> pd.Series:
         url = f"{base_url}/IMF.STA/CPI/~/{key}?c[TIME_PERIOD]=ge:1976-01"
     else:
         key = f"{iso3}.XDC_USD.PA_RT.M"
-        url = f"{base_url}/IMF.STA/IFS/~/{key}?c[TIME_PERIOD]=ge:1976-01"
+        url = f"{base_url}/IMF.STA/ER/~/{key}?c[TIME_PERIOD]=ge:1976-01"
         
     headers = {
         "Accept": "application/vnd.sdmx.data+csv;version=1.0.0",
@@ -158,7 +158,7 @@ else:
 
         # Interactive Plotting using Plotly
         st.markdown("---")
-        st.subheader("📊 Interactive Exchange Rate Charts")
+        st.subheader("📊 Interactive Exchange RateCharts")
 
         fig = make_subplots(specs=[[{"secondary_y": True}]])
         show_real = chart_metric in ["Real", "Both"]
