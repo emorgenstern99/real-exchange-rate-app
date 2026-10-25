@@ -41,20 +41,20 @@ IMF_COUNTRIES = {
 def fetch_imf_series(iso3: str, indicator_type: str) -> pd.Series:
     """
     Fetches monthly time-series data directly from the official IMF SDMX 3.0 API endpoint
-    using ISO Alpha-3 codes and correct dataflow syntax.
+    using correct wildcard versioning and filter syntax.
     """
     base_url = "https://api.imf.org/external/sdmx/3.0/data"
     
     if indicator_type == "CPI":
-        # Key format: {ISO3}.CPI._T.IX.M
+        # Format: {ISO3}.CPI._T.IX.M with latest version wildcard ~
         key = f"{iso3}.CPI._T.IX.M"
-        path = f"IMF.STA,CPI,5.0.0/{key}"
+        dataflow = "IMF.STA,CPI,~"
     else:
-        # Key format: {ISO3}.XDC_USD.PA_RT.M
+        # Format: {ISO3}.XDC_USD.PA_RT.M with latest version wildcard ~
         key = f"{iso3}.XDC_USD.PA_RT.M"
-        path = f"IMF.STA,IFS,3.0.0/{key}"
+        dataflow = "IMF.STA,IFS,~"
         
-    url = f"{base_url}/{path}?startPeriod=1976-01"
+    url = f"{base_url}/dataflow/{dataflow}/{key}?c[TIME_PERIOD]=ge:1976-01"
     headers = {
         "Accept": "application/vnd.sdmx.data+csv;version=1.0.0",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -69,7 +69,7 @@ def fetch_imf_series(iso3: str, indicator_type: str) -> pd.Series:
         if df.empty or 'TIME_PERIOD' not in df.columns or 'OBS_VALUE' not in df.columns:
             return pd.Series(dtype=float)
             
-        # Clean monthly periods (handling both YYYY-MM and YYYY-M01 formats)
+        # Clean monthly periods (handling YYYY-M01 or YYYY-MM formats)
         df['TIME_PERIOD'] = df['TIME_PERIOD'].astype(str).str.replace('-M', '-', regex=False)
         df['TIME_PERIOD'] = pd.to_datetime(df['TIME_PERIOD'], errors='coerce')
         df['OBS_VALUE'] = pd.to_numeric(df['OBS_VALUE'], errors='coerce')
