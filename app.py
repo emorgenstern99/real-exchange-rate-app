@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# IMF Country List mapping to ISO Alpha-3 and Euro Area Code
+# IMF Country List mapping to ISO Alpha-3 codes and Euro Area code (G163)
 IMF_COUNTRIES = {
     "United States": "USA",
     "Euro Area": "G163",
@@ -40,21 +40,18 @@ IMF_COUNTRIES = {
 @st.cache_data(show_spinner=False, ttl=86400)
 def fetch_imf_series(iso3: str, indicator_type: str) -> pd.Series:
     """
-    Fetches monthly time-series data directly from the official IMF SDMX 3.0 API endpoint
-    using correct wildcard versioning and filter syntax.
+    Fetches monthly time-series data directly from the official IMF SDMX 3.0 API 
+    using the verified dataflow REST path, version wildcard ~, and time constraints.
     """
-    base_url = "https://api.imf.org/external/sdmx/3.0/data"
+    base_url = "https://api.imf.org/external/sdmx/3.0/data/dataflow"
     
     if indicator_type == "CPI":
-        # Format: {ISO3}.CPI._T.IX.M with latest version wildcard ~
         key = f"{iso3}.CPI._T.IX.M"
-        dataflow = "IMF.STA,CPI,~"
+        url = f"{base_url}/IMF.STA/CPI/~/{key}?c[TIME_PERIOD]=ge:1976-01"
     else:
-        # Format: {ISO3}.XDC_USD.PA_RT.M with latest version wildcard ~
         key = f"{iso3}.XDC_USD.PA_RT.M"
-        dataflow = "IMF.STA,IFS,~"
+        url = f"{base_url}/IMF.STA/IFS/~/{key}?c[TIME_PERIOD]=ge:1976-01"
         
-    url = f"{base_url}/dataflow/{dataflow}/{key}?c[TIME_PERIOD]=ge:1976-01"
     headers = {
         "Accept": "application/vnd.sdmx.data+csv;version=1.0.0",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
@@ -83,7 +80,7 @@ def fetch_imf_series(iso3: str, indicator_type: str) -> pd.Series:
 # App Layout
 st.title("🌐 IMF Real Exchange Rate (RER) Analysis Dashboard")
 st.markdown("""
-Compare bilateral real and nominal exchange rates using official monthly CPI and exchange-rate data retrieved directly from the **IMF SDMX 3.0 API**.
+Compare bilateral real and nominal exchange rates using official monthly CPI and exchange-rate records retrieved live from the **IMF SDMX 3.0 API**.
 """)
 
 with st.sidebar:
